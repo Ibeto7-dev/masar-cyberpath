@@ -1,12 +1,24 @@
 function reply(data,status=200){return Response.json(data,{status,headers:{'Cache-Control':'private, no-store'}})}
 export default {async fetch(req,env){
  const url=new URL(req.url),path=url.pathname;
+ if(path.startsWith('/auth/google'))return googleRoute(req,url);
+ if(path==='/api/import-chatgpt'){
+  if(req.method!=='POST'||req.headers.get('origin')!==url.origin)return reply({},403);
+  const g=await googleIdentity(req),oldId=req.headers.get('oai-authenticated-user-id');
+  if(!g||g.expired||!oldId||req.headers.get('x-expected-account')!=='google:'+g.id)return reply({},403);
+  const old=await env.DB.prepare('SELECT payload FROM study_accounts WHERE user_id=?').bind(oldId).first();
+  if(!old)return reply({},404);
+  const payload=JSON.parse(old.payload);
+  if(!validState(payload))return reply({},422);
+  return googleAccount(new Request(url.origin+'/api/account',{method:'PUT',headers:{origin:url.origin,'content-type':'application/json','x-expected-account':'google:'+g.id},body:JSON.stringify({state:payload,revision:0})}),g);
+ }
  if(path!=='/api/account'){
   const file=path==='/'?'/index.html':path;
   if(req.method!=='GET'||!Object.hasOwn(assets,file))return new Response('Not found',{status:404});
   const types={js:'text/javascript',css:'text/css',html:'text/html',svg:'image/svg+xml'};
   return new Response(assets[file],{headers:{'Content-Type':types[file.split('.').pop()]+'; charset=utf-8','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});
  }
+ const google=await googleIdentity(req);if(google)return googleAccount(req,google);
  const user=req.headers.get('oai-authenticated-user-id');
  if(!user)return reply({error:'signin'},401);
  if(req.method==='GET'){
